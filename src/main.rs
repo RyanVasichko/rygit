@@ -1,25 +1,21 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
 
-/// A simple CLI app with multiple commands
-#[derive(Parser)]
-#[command(name = "rygit")]
-#[command(about = "Ryan's git clone", long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
+use crate::cli::Cli;
 
-#[derive(Subcommand)]
-enum Commands {
-    Init { name: String },
-}
+mod cli;
+mod commands;
+mod utils;
+mod objects;
 
 fn main() {
     let cli = Cli::parse();
-
-    match &cli.command {
-        Commands::Init { name } => {
-            println!("Repository \"{}\" initialized!", name);
+    let result = cli::run(cli);
+    match result {
+        Ok(_) => (),
+        Err(err) => {
+            for cause in err.chain() {
+                eprintln!("{}", cause)
+            }
         }
     }
 }
