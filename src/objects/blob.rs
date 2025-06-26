@@ -1,38 +1,40 @@
 use anyhow::{Context, Result};
-use flate2::{Compression, write::ZlibEncoder};
 use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
 };
 
-use crate::utils::{self, compress};
+use crate::utils;
 
+#[derive(Debug)]
 pub struct Blob {
-    pub path: PathBuf,
     pub hash: [u8; 20],
+    pub serialized_data: Vec<u8>,
 }
 
 impl Blob {
-    pub fn new(file_path: &Path, rygit_objects_path: &Path) -> Result<Self> {
-        let blob = create_blob_contents_from_file(file_path).with_context(|| {
+    pub fn new(file_path: impl AsRef<Path>) -> Result<Self> {
+        let file_path = file_path.as_ref();
+        let serialized_data = serialize_blob(file_path).with_context(|| {
             format!(
                 "Unable to create blob contents for file {}",
                 file_path.display()
             )
         })?;
+        let hash = utils::hash(&serialized_data);
 
-        let hash = utils::hash(&blob);
-        let hex_hash = hex::encode(hash);
-        let blob_folder = &hex_hash[0..2];
+        Ok(Self { serialized_data, hash })
+    }
+
+    pub fn write(&self, objects_path: &Path) -> Result<PathBuf> {
+        let hex_hash = hex::encode(self.hash);
+        let blob_dir = &hex_hash[0..2];
         let blob_file_name = &hex_hash[2..];
-        let blob_file_path = rygit_objects_path.join(blob_folder).join(blob_file_name);
+        let blob_file_path = objects_path.join(blob_dir).join(blob_file_name);
 
         if blob_file_path.exists() {
-            return Ok(Blob {
-                path: blob_file_path,
-                hash,
-            });
+            return Ok(blob_file_path);
         }
 
         if let Some(parent) = blob_file_path.parent() {
@@ -43,21 +45,18 @@ impl Blob {
 
         let mut blob_file = File::create(&blob_file_path)
             .with_context(|| format!("Unable to create blob file {}", blob_file_path.display()))?;
-        let blob = compress(&blob)
+        let blob_contents = utils::compress(&self.serialized_data)
             .with_context(|| format!("Unable to compress blob {}", blob_file_path.display()))?;
 
         blob_file
-            .write_all(&blob)
+            .write_all(&blob_contents)
             .with_context(|| format!("Unable to write blob file {}", blob_file_path.display()))?;
 
-        Ok(Blob {
-            path: blob_file_path,
-            hash,
-        })
+        Ok(blob_file_path)
     }
 }
 
-fn create_blob_contents_from_file(file_path: &Path) -> Result<Vec<u8>> {
+fn serialize_blob(file_path: &Path) -> Result<Vec<u8>> {
     let file_contents = fs::read(file_path)
         .with_context(|| format!("Unable to read file {}", file_path.display()))?;
     let file_length = file_contents.len();
@@ -84,16 +83,17 @@ mod tests {
         let mut file = NamedTempFile::new()?;
         let file_contents = "Hello world\n\n";
         write!(file, "{}", file_contents)?;
-        let folder = TempDir::new()?;
+        let objects_dir = TempDir::new()?;
 
-        let blob = Blob::new(file.path(), folder.path())?;
-        let mut blob_file = File::open(blob.path)?;
+        let blob = Blob::new(file.path())?;
+        let blob_file_path = blob.write(objects_dir.path())?;
+        let mut blob_file = File::open(blob_file_path)?;
         let mut blob_file_contents: Vec<u8> = vec![];
         blob_file.seek(SeekFrom::Start(0))?;
         blob_file.read_to_end(&mut blob_file_contents)?;
 
         let expected = format!("blob 13\0{}", file_contents).into_bytes();
-        let expected = compress(&expected)?;
+        let expected = utils::compress(&expected)?;
         assert_eq!(expected, blob_file_contents);
 
         let expected_hash = utils::hash(&format!("blob 13\0{}", file_contents).into_bytes());

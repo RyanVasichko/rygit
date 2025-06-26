@@ -1,7 +1,12 @@
+use std::fs;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use crate::commands::init;
+use crate::{
+    commands::init,
+    objects::{blob::Blob, tree::Tree},
+};
 
 #[derive(Parser)]
 #[command(name = "rygit")]
@@ -14,12 +19,28 @@ pub(crate) struct Cli {
 #[derive(Subcommand)]
 pub(crate) enum Commands {
     Init { name: String },
+    Fake,
 }
 
 pub(crate) fn run(cli: Cli) -> Result<()> {
     match &cli.command {
         Commands::Init { name } => {
             init::run(name);
+        }
+        Commands::Fake => {
+            // Temporary code to get the compiler to stop warning about unused code
+            let current_dir = std::env::current_dir()?;
+            let dir = fs::read_dir(&current_dir)?;
+            for entry in dir {
+                let entry = entry?;
+                if entry.path().is_dir() {
+                    let tree = Tree::new(entry.path().as_path())?;
+                    println!("{}", tree.entries.len());
+                } else if entry.path().is_file() {
+                    let blob = Blob::new(entry.path().as_path())?;
+                    blob.write(current_dir.as_path())?;
+                }
+            }
         }
     }
 
