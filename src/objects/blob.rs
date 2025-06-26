@@ -5,11 +5,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::utils;
+use crate::{hash::Hash, utils};
 
 #[derive(Debug)]
 pub struct Blob {
-    pub hash: [u8; 20],
+    pub hash: Hash,
     pub serialized_data: Vec<u8>,
 }
 
@@ -22,16 +22,16 @@ impl Blob {
                 file_path.display()
             )
         })?;
-        let hash = utils::hash(&serialized_data);
+        let hash = Hash::of(&serialized_data);
 
-        Ok(Self { serialized_data, hash })
+        Ok(Self {
+            serialized_data,
+            hash,
+        })
     }
 
     pub fn write(&self, objects_path: &Path) -> Result<PathBuf> {
-        let hex_hash = hex::encode(self.hash);
-        let blob_dir = &hex_hash[0..2];
-        let blob_file_name = &hex_hash[2..];
-        let blob_file_path = objects_path.join(blob_dir).join(blob_file_name);
+        let blob_file_path = objects_path.join(self.hash.to_object_path());
 
         if blob_file_path.exists() {
             return Ok(blob_file_path);
@@ -96,7 +96,7 @@ mod tests {
         let expected = utils::compress(&expected)?;
         assert_eq!(expected, blob_file_contents);
 
-        let expected_hash = utils::hash(&format!("blob 13\0{}", file_contents).into_bytes());
+        let expected_hash = Hash::of(&format!("blob 13\0{}", file_contents).into_bytes());
         assert_eq!(blob.hash, expected_hash);
 
         Ok(())

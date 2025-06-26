@@ -1,6 +1,9 @@
 use strum::Display;
 
-use crate::objects::{blob::Blob, tree::Tree};
+use crate::{
+    hash::Hash,
+    objects::{blob::Blob, tree::Tree},
+};
 
 pub mod blob;
 pub mod tree;
@@ -12,7 +15,7 @@ pub enum Object {
 }
 
 impl Object {
-    pub fn hash(&self) -> [u8; 20] {
+    pub fn hash(&self) -> Hash {
         match self {
             Object::Blob(blob) => blob.hash,
             Object::Tree(tree) => tree.hash,

@@ -7,8 +7,8 @@ use anyhow::{Context, Result, anyhow};
 use strum::{Display, EnumString};
 
 use crate::{
+    hash::Hash,
     objects::{Object, blob::Blob},
-    utils,
 };
 
 #[derive(Debug, Clone, PartialEq, Display, EnumString)]
@@ -30,7 +30,7 @@ pub struct TreeEntry {
 pub struct Tree {
     pub entries: Vec<TreeEntry>,
     pub serialized_data: Vec<u8>,
-    pub hash: [u8; 20],
+    pub hash: Hash,
 }
 
 impl Tree {
@@ -86,12 +86,12 @@ impl Tree {
         for entry in &entries {
             let entry_header = format!("{} {}\0", entry.mode, entry.name);
             body.extend_from_slice(entry_header.as_bytes());
-            body.extend_from_slice(&entry.object.hash());
+            body.extend_from_slice(entry.object.hash().as_bytes());
         }
 
         let mut serialized_data = format!("tree {}\0", body.len()).as_bytes().to_vec();
         serialized_data.extend_from_slice(&body);
-        let hash = utils::hash(&serialized_data);
+        let hash = Hash::of(&serialized_data);
         Ok(Self {
             serialized_data,
             hash,
@@ -111,7 +111,7 @@ mod tests {
 
     use super::*;
 
-    fn assert_entry(entry: &TreeEntry, mode: EntryMode, name: &str, hash: &[u8; 20]) {
+    fn assert_entry(entry: &TreeEntry, mode: EntryMode, name: &str, hash: &Hash) {
         assert_eq!(mode, entry.mode);
         assert_eq!(name, entry.name);
         assert_eq!(*hash, entry.object.hash());
@@ -256,13 +256,13 @@ mod tests {
 
         let expected_body = [
             format!("{} {}\0", EntryMode::File, "a.txt").as_bytes(),
-            &blob1.hash,
+            blob1.hash.as_bytes(),
             format!("{} {}\0", EntryMode::Directory, "b_dir").as_bytes(),
-            &tree1.hash,
+            tree1.hash.as_bytes(),
             format!("{} {}\0", EntryMode::File, "c.txt").as_bytes(),
-            &blob2.hash,
+            blob2.hash.as_bytes(),
             format!("{} {}\0", EntryMode::Directory, "d_dir").as_bytes(),
-            &tree2.hash,
+            tree2.hash.as_bytes(),
         ]
         .concat();
         let expected_contents = [

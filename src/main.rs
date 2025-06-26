@@ -4,8 +4,9 @@ use crate::cli::Cli;
 
 mod cli;
 mod commands;
-mod utils;
+mod hash;
 mod objects;
+mod utils;
 
 fn main() {
     let cli = Cli::parse();
