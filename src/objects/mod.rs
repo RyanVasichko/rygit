@@ -6,6 +6,7 @@ use crate::{
 };
 
 pub mod blob;
+pub mod commit;
 pub mod tree;
 
 #[derive(Debug, Display)]
