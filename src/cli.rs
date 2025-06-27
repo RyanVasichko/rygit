@@ -1,6 +1,6 @@
-use std::fs;
+use std::{env, fs};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use crate::{
@@ -25,7 +25,10 @@ pub(crate) enum Commands {
 pub(crate) fn run(cli: Cli) -> Result<()> {
     match &cli.command {
         Commands::Init { name } => {
-            init::run(name);
+            init::run(
+                name,
+                env::current_dir().context("Unable to determine the current directory")?,
+            )?;
         }
         Commands::Fake => {
             // Temporary code to get the compiler to stop warning about unused code
