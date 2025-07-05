@@ -1,8 +1,7 @@
-use std::io::Write;
+use std::io::{Read, Write};
 
 use anyhow::Result;
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
-use std::io::Read;
 
 pub fn compress(contents: &[u8]) -> Result<Vec<u8>> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());

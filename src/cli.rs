@@ -1,49 +1,36 @@
-use std::{env, fs};
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::{
-    commands::init,
-    objects::{blob::Blob, tree::Tree},
+    commands::{self},
+    paths::repository_root_path,
 };
 
 #[derive(Parser)]
 #[command(name = "rygit")]
 #[command(about = "Ryan's git clone", long_about = None)]
-pub(crate) struct Cli {
+pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 }
 
 #[derive(Subcommand)]
-pub(crate) enum Commands {
-    Init { name: String },
-    Fake,
+pub enum Commands {
+    Init,
+    Commit {
+        #[clap(short, long)]
+        message: String,
+    },
 }
 
-pub(crate) fn run(cli: Cli) -> Result<()> {
+pub fn run(cli: Cli) -> Result<()> {
     match &cli.command {
-        Commands::Init { name } => {
-            init::run(
-                name,
-                env::current_dir().context("Unable to determine the current directory")?,
-            )?;
+        Commands::Init => {
+            commands::init::run(repository_root_path())?;
         }
-        Commands::Fake => {
-            // Temporary code to get the compiler to stop warning about unused code
-            let current_dir = std::env::current_dir()?;
-            let dir = fs::read_dir(&current_dir)?;
-            for entry in dir {
-                let entry = entry?;
-                if entry.path().is_dir() {
-                    let tree = Tree::new(entry.path().as_path())?;
-                    println!("{}", tree.entries.len());
-                } else if entry.path().is_file() {
-                    let blob = Blob::new(entry.path().as_path())?;
-                    blob.write(current_dir.as_path())?;
-                }
-            }
+        Commands::Commit { message } => {
+            // TODO: Ensure the current directory is a repo
+            commands::commit::run(message)?;
         }
     }
 

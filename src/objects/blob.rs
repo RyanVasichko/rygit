@@ -1,104 +1,81 @@
-use anyhow::{Context, Result};
 use std::{
     fs::{self, File},
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
-use crate::{hash::Hash, utils};
+use anyhow::{Context, Result, bail};
 
-#[derive(Debug)]
+use crate::{
+    compression::{compress, decompress},
+    hash::Hash,
+};
+
+// blob format:
+// <type> <size>\0<content>
+#[derive(Debug, PartialEq, Eq)]
 pub struct Blob {
-    pub hash: Hash,
-    pub serialized_data: Vec<u8>,
+    hash: Hash,
 }
 
 impl Blob {
-    pub fn new(file_path: impl AsRef<Path>) -> Result<Self> {
-        let file_path = file_path.as_ref();
-        let serialized_data = serialize_blob(file_path).with_context(|| {
+    pub fn create(_path: impl AsRef<Path>) -> Result<Self> {
+        let file_path = _path.as_ref();
+        let serialized_data = serialize(file_path).with_context(|| {
             format!(
                 "Unable to create blob contents for file {}",
                 file_path.display()
             )
         })?;
         let hash = Hash::of(&serialized_data);
+        let serialized_data = compress(&serialized_data)?;
+        let object_path = hash.object_path();
+        if !object_path.try_exists().unwrap() {
+            fs::create_dir_all(object_path.parent().unwrap())
+                .context("Unable to generate blob. Unable to create parent directory")?;
+            let mut file = File::create(&object_path)
+                .context("Unable to generate blob. Unable to create object file")?;
+            file.write_all(&serialized_data)
+                .context("Unable to generate blob. Unable to write object file")?;
+        }
 
-        Ok(Self {
-            serialized_data,
-            hash,
-        })
+        Ok(Self { hash })
     }
 
-    pub fn write(&self, objects_path: &Path) -> Result<PathBuf> {
-        let blob_file_path = objects_path.join(self.hash.to_object_path());
-
-        if blob_file_path.exists() {
-            return Ok(blob_file_path);
+    pub fn body(&self) -> Result<Vec<u8>> {
+        let path = self.hash.object_path();
+        let mut buf = vec![];
+        File::open(path).unwrap().read_to_end(&mut buf).unwrap();
+        let mut contents = decompress(&buf)?;
+        if let Some(pos) = contents.iter().position(|&x| x == 0) {
+            contents.drain(0..=pos);
+        } else {
+            bail!("Invalid blob header")
         }
 
-        if let Some(parent) = blob_file_path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("Unable to create parent directories {}", parent.display())
-            })?;
-        }
+        Ok(contents)
+    }
 
-        let mut blob_file = File::create(&blob_file_path)
-            .with_context(|| format!("Unable to create blob file {}", blob_file_path.display()))?;
-        let blob_contents = utils::compress(&self.serialized_data)
-            .with_context(|| format!("Unable to compress blob {}", blob_file_path.display()))?;
+    pub fn hash(&self) -> &Hash {
+        &self.hash
+    }
 
-        blob_file
-            .write_all(&blob_contents)
-            .with_context(|| format!("Unable to write blob file {}", blob_file_path.display()))?;
+    pub fn load(object_path: PathBuf) -> Result<Self> {
+        let hash = Hash::from_object_path(&object_path)?;
+        let blob = Self { hash };
 
-        Ok(blob_file_path)
+        Ok(blob)
     }
 }
-
-fn serialize_blob(file_path: &Path) -> Result<Vec<u8>> {
+fn serialize(file_path: &Path) -> Result<Vec<u8>> {
     let file_contents = fs::read(file_path)
         .with_context(|| format!("Unable to read file {}", file_path.display()))?;
     let file_length = file_contents.len();
-    let header = format!("blob {}\0", file_length);
+    let header = format!("blob {file_length}\0");
 
     let mut blob = Vec::with_capacity(header.len() + file_length);
     blob.extend_from_slice(header.as_bytes());
     blob.extend_from_slice(&file_contents);
 
     Ok(blob)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::io::{Read, Seek, SeekFrom, Write};
-
-    use anyhow::Result;
-    use tempfile::{NamedTempFile, TempDir};
-
-    use super::*;
-
-    #[test]
-    fn test_new() -> Result<()> {
-        let mut file = NamedTempFile::new()?;
-        let file_contents = "Hello world\n\n";
-        write!(file, "{}", file_contents)?;
-        let objects_dir = TempDir::new()?;
-
-        let blob = Blob::new(file.path())?;
-        let blob_file_path = blob.write(objects_dir.path())?;
-        let mut blob_file = File::open(blob_file_path)?;
-        let mut blob_file_contents: Vec<u8> = vec![];
-        blob_file.seek(SeekFrom::Start(0))?;
-        blob_file.read_to_end(&mut blob_file_contents)?;
-
-        let expected = format!("blob 13\0{}", file_contents).into_bytes();
-        let expected = utils::compress(&expected)?;
-        assert_eq!(expected, blob_file_contents);
-
-        let expected_hash = Hash::of(&format!("blob 13\0{}", file_contents).into_bytes());
-        assert_eq!(blob.hash, expected_hash);
-
-        Ok(())
-    }
 }

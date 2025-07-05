@@ -1,5 +1,3 @@
-use strum::Display;
-
 use crate::{
     hash::Hash,
     objects::{blob::Blob, tree::Tree},
@@ -7,19 +5,20 @@ use crate::{
 
 pub mod blob;
 pub mod commit;
+pub mod signature;
 pub mod tree;
 
-#[derive(Debug, Display)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Object {
     Blob(Blob),
     Tree(Tree),
 }
 
 impl Object {
-    pub fn hash(&self) -> Hash {
+    pub fn hash(&self) -> &Hash {
         match self {
-            Object::Blob(blob) => blob.hash,
-            Object::Tree(tree) => tree.hash,
+            Object::Blob(blob) => blob.hash(),
+            Object::Tree(tree) => tree.hash(),
         }
     }
 }

@@ -6,8 +6,9 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 
-pub fn run(name: &str, initialization_directory: impl AsRef<Path>) -> Result<()> {
-    let rygit_dir = initialization_directory.as_ref().join(".rygit");
+pub fn run(path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+    let rygit_dir = path.join(".rygit");
     if rygit_dir.exists() {
         return Err(anyhow!("rygit already initialized"));
     }
@@ -26,34 +27,42 @@ pub fn run(name: &str, initialization_directory: impl AsRef<Path>) -> Result<()>
     fs::create_dir(refs_path.join("heads"))
         .context("Unable to initialize rygit, unable to create .rygit/refs/heads directory")?;
 
-    println!("Repository \"{name}\" initialized!");
+    File::create(refs_path.join("heads").join("master"))
+        .context("Unable to initialize rygit. Unable to create refs/heads/master")?;
+
+    println!("Repository initialized!");
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{env, fs};
 
     use anyhow::{Ok, Result};
+    use serial_test::serial;
     use tempfile::TempDir;
 
     use super::*;
 
     #[test]
+    #[serial]
     fn test_run_when_already_initialized() -> Result<()> {
         let dir = TempDir::new()?;
+        env::set_current_dir(&dir)?;
         fs::create_dir(dir.path().join(".rygit"))?;
-        let result = run("test", dir);
+        let result = run(dir);
         assert!(result.is_err());
 
         Ok(())
     }
 
     #[test]
+    #[serial]
     fn test_run_initializes_ryigit() -> Result<()> {
         let dir = TempDir::new()?;
-        run("test", &dir)?;
+
+        run(&dir)?;
 
         let rygit_path = dir.path().join(".rygit");
         let rygit_initialized = rygit_path.exists() && rygit_path.is_dir();

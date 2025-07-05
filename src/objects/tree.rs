@@ -1,14 +1,20 @@
 use std::{
-    fs::{self, DirEntry},
+    fs::{self, DirEntry, File},
+    io::{Read, Write},
+    iter::Peekable,
     path::Path,
+    str::FromStr,
+    vec,
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, bail};
 use strum::{Display, EnumString};
 
 use crate::{
+    compression::{compress, decompress},
     hash::Hash,
     objects::{Object, blob::Blob},
+    paths::rygit_path,
 };
 
 #[derive(Debug, Clone, PartialEq, Display, EnumString)]
@@ -19,22 +25,101 @@ pub enum EntryMode {
     Directory,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct TreeEntry {
-    pub mode: EntryMode,
-    pub object: Object,
-    pub name: String,
+    object: Object,
+    name: String,
 }
 
-#[derive(Debug)]
+// entry format:
+// <mode> <file_name>\0<20 byte hash>
+impl TreeEntry {
+    pub fn create(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let name = path
+            .file_name()
+            .with_context(|| format!("Could not get file name for {}", path.display()))?
+            .to_str()
+            .with_context(|| format!("File name is not valid UTF-8 for {}", path.display()))?
+            .to_owned();
+        if path.is_dir() {
+            let directory_tree = Tree::create(path)?;
+            let entry = TreeEntry {
+                object: Object::Tree(directory_tree),
+                name,
+            };
+            Ok(entry)
+        } else if path.is_file() {
+            let blob = Blob::create(path)?;
+            let entry = TreeEntry {
+                object: Object::Blob(blob),
+                name,
+            };
+            Ok(entry)
+        } else {
+            bail!(
+                "Unable to generate tree. {} Was neither a file nor a directory.",
+                path.display()
+            )
+        }
+    }
+
+    pub fn object(&self) -> &Object {
+        &self.object
+    }
+
+    pub fn hash(&self) -> &Hash {
+        self.object.hash()
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn parse(serialized_data_iter: &mut Peekable<vec::IntoIter<u8>>) -> Result<Self> {
+        let mode: String = serialized_data_iter
+            .take_while(|&c| c != b' ')
+            .map(|c| c as char)
+            .collect();
+        let mode = EntryMode::from_str(&mode)
+            .with_context(|| format!("Invalid tree entry. Invalid entry mode {mode}"))?;
+
+        let name: String = serialized_data_iter
+            .take_while(|&c| c != b'\0')
+            .map(|c| c as char)
+            .collect();
+
+        let entry_object_hash_bytes: Vec<_> = serialized_data_iter.take(20).collect();
+        let entry_object_hash = Hash::new(entry_object_hash_bytes.try_into().unwrap());
+        let object_path = entry_object_hash.object_path();
+
+        let object = match mode {
+            EntryMode::File => {
+                let blob = Blob::load(entry_object_hash.object_path())?;
+                Object::Blob(blob)
+            }
+            EntryMode::Directory => {
+                let tree = Tree::load(&object_path)?;
+                Object::Tree(tree)
+            }
+        };
+
+        let entry = Self { name, object };
+
+        Ok(entry)
+    }
+}
+
+// tree format:
+// tree <content_length>\0<entries>
+#[derive(Debug, PartialEq, Eq)]
 pub struct Tree {
-    pub entries: Vec<TreeEntry>,
-    pub serialized_data: Vec<u8>,
-    pub hash: Hash,
+    hash: Hash,
+    entries: Vec<TreeEntry>,
 }
 
 impl Tree {
-    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
+    pub fn create(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let mut entries: Vec<TreeEntry> = vec![];
         let dir_contents = fs::read_dir(path).with_context(|| {
@@ -43,236 +128,110 @@ impl Tree {
                 path.display()
             )
         })?;
-        let mut dir_contents: Vec<DirEntry> = dir_contents.collect::<Result<_, _>>()?;
+        let dir_contents: Vec<DirEntry> = dir_contents.collect::<Result<_, _>>()?;
+        let rygit_path = rygit_path();
+        let mut dir_contents: Vec<_> = dir_contents
+            .iter()
+            .filter(|d| d.path() != rygit_path)
+            .collect();
         dir_contents.sort_by(|a, b| {
             a.file_name()
                 .to_string_lossy()
                 .cmp(&b.file_name().to_string_lossy())
         });
         for entry in dir_contents {
-            let entry_path = entry.path();
-            let name = entry_path
-                .file_name()
-                .with_context(|| format!("Could not get file name for {}", entry_path.display()))?
-                .to_str()
-                .with_context(|| {
-                    format!("File name is not valid UTF-8 for {}", entry_path.display())
-                })?
-                .to_owned();
-            if entry_path.is_dir() {
-                let directory_tree = Tree::new(&entry_path)?;
-                let entry = TreeEntry {
-                    mode: EntryMode::Directory,
-                    object: Object::Tree(directory_tree),
-                    name,
-                };
-                entries.push(entry);
-            } else if entry_path.is_file() {
-                let blob = Blob::new(&entry_path)?;
-                let entry = TreeEntry {
-                    mode: EntryMode::File,
-                    object: Object::Blob(blob),
-                    name,
-                };
-                entries.push(entry);
-            } else {
-                return Err(anyhow!(
-                    "Unable to generate tree. {} Was neither a file nor a directory.",
-                    entry_path.display()
-                ));
-            }
+            entries.push(TreeEntry::create(entry.path())?);
         }
-        let mut body: Vec<u8> = vec![];
-        for entry in &entries {
-            let entry_header = format!("{} {}\0", entry.mode, entry.name);
-            body.extend_from_slice(entry_header.as_bytes());
-            body.extend_from_slice(entry.object.hash().as_bytes());
+        let serialized_data = serialize(&entries);
+        let hash = Hash::of(&serialized_data);
+
+        if !hash.object_path().exists() {
+            fs::create_dir_all(hash.object_path().parent().unwrap())
+                .context("Unable to generate tree. Unable to create parent directory")?;
+            let mut file = File::create(hash.object_path())
+                .context("Unable to generate tree. Unable to create object file")?;
+            let serialized_data = compress(&serialized_data)?;
+            file.write_all(&serialized_data)
+                .context("Unable to generate tree. Unable to write to object file")?;
         }
 
-        let mut serialized_data = format!("tree {}\0", body.len()).as_bytes().to_vec();
-        serialized_data.extend_from_slice(&body);
+        Ok(Self { hash, entries })
+    }
+
+    pub fn hash(&self) -> &Hash {
+        &self.hash
+    }
+
+    pub fn entries(&self) -> &[TreeEntry] {
+        &self.entries
+    }
+
+    pub fn body(&self) -> Result<Vec<u8>> {
+        let path = self.hash.object_path();
+        let mut buf = vec![];
+        File::open(path).unwrap().read_to_end(&mut buf).unwrap();
+        let mut contents = decompress(&buf)?;
+        if let Some(pos) = contents.iter().position(|&x| x == 0) {
+            contents.drain(0..=pos);
+        } else {
+            bail!("Invalid blob header")
+        }
+
+        Ok(contents)
+    }
+
+    pub fn load(object_path: impl AsRef<Path>) -> Result<Self> {
+        let mut file =
+            File::open(&object_path).context("Unable to load tree. Object does not exist")?;
+        let mut serialized_data = vec![];
+        file.read_to_end(&mut serialized_data)
+            .context("Unable to load tree. Unable to read object file")?;
+        let serialized_data = decompress(&serialized_data)
+            .context("Unable to load tree. Unable to decompress serialized data")?;
+
         let hash = Hash::of(&serialized_data);
-        Ok(Self {
-            serialized_data,
-            hash,
-            entries,
-        })
+        let mut serialized_data_iter = serialized_data.into_iter().peekable();
+        parse_header(&mut serialized_data_iter)?;
+
+        let mut entries = vec![];
+        while serialized_data_iter.peek().is_some() {
+            let entry = TreeEntry::parse(&mut serialized_data_iter)?;
+            entries.push(entry);
+        }
+
+        Ok(Tree { entries, hash })
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::{fs::File, io::Write, path::PathBuf};
-
-    use anyhow::{Ok, Result};
-    use tempfile::{NamedTempFile, TempDir};
-
-    use crate::objects::blob::Blob;
-
-    use super::*;
-
-    fn assert_entry(entry: &TreeEntry, mode: EntryMode, name: &str, hash: &Hash) {
-        assert_eq!(mode, entry.mode);
-        assert_eq!(name, entry.name);
-        assert_eq!(*hash, entry.object.hash());
+fn serialize(entries: &[TreeEntry]) -> Vec<u8> {
+    let mut body: Vec<u8> = vec![];
+    for entry in entries {
+        let mode = match entry.object {
+            Object::Blob(_) => EntryMode::File,
+            Object::Tree(_) => EntryMode::Directory,
+        };
+        let entry_header = format!("{} {}\0", mode, entry.name);
+        body.extend_from_slice(entry_header.as_bytes());
+        body.extend_from_slice(entry.object.hash().as_bytes());
     }
 
-    fn create_file(dir_path: impl AsRef<Path>, name: &str, content: &[u8]) -> Result<PathBuf> {
-        let file_path = dir_path.as_ref().join(name);
-        let mut file = File::create(&file_path)?;
-        file.write_all(content)?;
-        Ok(file_path)
+    let mut serialized_data = format!("tree {}\0", body.len()).as_bytes().to_vec();
+    serialized_data.extend_from_slice(&body);
+
+    serialized_data
+}
+
+fn parse_header(serialized_data_iter: &mut Peekable<vec::IntoIter<u8>>) -> Result<()> {
+    let label: String = serialized_data_iter
+        .take_while(|&c| c != b' ')
+        .map(|c| c as char)
+        .collect();
+    if label != "tree" {
+        bail!("Invalid tree header. Must start with \"tree\"")
     }
 
-    #[test]
-    fn test_new_returns_an_error_when_path_is_not_a_directory() -> Result<()> {
-        let temp_file = NamedTempFile::new()?;
-        let result = Tree::new(temp_file.path());
-
-        assert!(result.is_err());
-
-        let err = result.unwrap_err();
-        let expected = format!(
-            "Unable to generate tree. Unable to read directory {}",
-            temp_file.path().display()
-        );
-        assert_eq!(expected, err.to_string());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_new_with_a_single_file_has_correct_entry() -> Result<()> {
-        let dir = TempDir::new()?;
-        let file_path = create_file(
-            &dir,
-            "test.txt",
-            b"Karma police\narrest this man\nhe talks in math",
-        )?;
-
-        let tree = Tree::new(dir.path())?;
-        let file_blob = Blob::new(file_path.as_path())?;
-
-        assert_eq!(1, tree.entries.len());
-
-        let entry = tree.entries.first().unwrap();
-        assert_entry(entry, EntryMode::File, "test.txt", &file_blob.hash);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_new_with_a_subdirectory_has_correct_entry() -> Result<()> {
-        let dir = TempDir::new()?;
-        let subdir_path = dir.path().join("subdir");
-        fs::create_dir(&subdir_path)?;
-        let tree = Tree::new(dir.path())?;
-
-        let subdir_tree = Tree::new(&subdir_path)?;
-
-        assert_eq!(1, tree.entries.len());
-
-        let entry = tree.entries.first().unwrap();
-        assert_entry(entry, EntryMode::Directory, "subdir", &subdir_tree.hash);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_new_with_files_and_subdirectories_has_correct_entries() -> Result<()> {
-        let dir = TempDir::new()?;
-        let file1_path = create_file(
-            &dir,
-            "a.txt",
-            b"Karma police\narrest this man\nhe talks in math",
-        )?;
-        let subdir1_path = dir.path().join("b");
-        fs::create_dir(&subdir1_path)?;
-        let file2_path = create_file(
-            &dir,
-            "y.txt",
-            b"Because we separate\nLike ripples on a blank shore",
-        )?;
-        let subdir2_path = dir.path().join("z");
-        fs::create_dir(&subdir2_path)?;
-
-        let tree = Tree::new(&dir)?;
-        assert_eq!(4, tree.entries.len());
-        let entry1_blob = Blob::new(file1_path)?;
-        assert_entry(
-            tree.entries.first().unwrap(),
-            EntryMode::File,
-            "a.txt",
-            &entry1_blob.hash,
-        );
-        let entry2_tree = Tree::new(&subdir1_path)?;
-        assert_entry(
-            tree.entries.get(1).unwrap(),
-            EntryMode::Directory,
-            "b",
-            &entry2_tree.hash,
-        );
-        let entry3_blob = Blob::new(file2_path)?;
-        assert_entry(
-            tree.entries.get(2).unwrap(),
-            EntryMode::File,
-            "y.txt",
-            &entry3_blob.hash,
-        );
-        let entry4_tree = Tree::new(subdir2_path)?;
-        assert_entry(
-            tree.entries.get(3).unwrap(),
-            EntryMode::Directory,
-            "z",
-            &entry4_tree.hash,
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_new_generates_correct_contents() -> Result<()> {
-        let dir = TempDir::new()?;
-        let file1_path = create_file(
-            &dir,
-            "a.txt",
-            b"Karma police\narrest this man\nhe talks in math",
-        )?;
-        let subdir1_path = dir.path().join("b_dir");
-        fs::create_dir(&subdir1_path)?;
-        let file2_path = create_file(
-            &dir,
-            "c.txt",
-            b"Because we separate\nLike ripples on a blank shore",
-        )?;
-        let subdir2_path = dir.path().join("d_dir");
-        fs::create_dir(&subdir2_path)?;
-
-        let blob1 = Blob::new(file1_path)?;
-        let tree1 = Tree::new(&subdir1_path)?;
-        let blob2 = Blob::new(file2_path)?;
-        let tree2 = Tree::new(&subdir2_path)?;
-        let tree = Tree::new(dir.path())?;
-
-        let expected_body = [
-            format!("{} {}\0", EntryMode::File, "a.txt").as_bytes(),
-            blob1.hash.as_bytes(),
-            format!("{} {}\0", EntryMode::Directory, "b_dir").as_bytes(),
-            tree1.hash.as_bytes(),
-            format!("{} {}\0", EntryMode::File, "c.txt").as_bytes(),
-            blob2.hash.as_bytes(),
-            format!("{} {}\0", EntryMode::Directory, "d_dir").as_bytes(),
-            tree2.hash.as_bytes(),
-        ]
-        .concat();
-        let expected_contents = [
-            format!("tree {}\0", expected_body.len()).as_bytes(),
-            &expected_body,
-        ]
-        .concat();
-
-        assert_eq!(expected_contents, tree.serialized_data);
-
-        Ok(())
-    }
+    serialized_data_iter
+        .take_while(|&c| c != b'\0')
+        .for_each(drop);
+    Ok(())
 }

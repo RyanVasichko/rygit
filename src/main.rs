@@ -2,11 +2,12 @@ use clap::Parser;
 
 use crate::cli::Cli;
 
-mod cli;
-mod commands;
-mod hash;
-mod objects;
-mod utils;
+pub mod cli;
+pub mod commands;
+pub mod compression;
+pub mod hash;
+pub mod objects;
+pub mod paths;
 
 fn main() {
     let cli = Cli::parse();
@@ -15,7 +16,7 @@ fn main() {
         Ok(_) => (),
         Err(err) => {
             for cause in err.chain() {
-                eprintln!("{}", cause)
+                eprintln!("{cause}")
             }
         }
     }
