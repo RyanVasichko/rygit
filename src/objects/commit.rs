@@ -28,8 +28,8 @@ pub struct Commit {
     _message: String,
     tree_hash: Hash,
     hash: Hash,
-    _parent_hashes: Vec<Hash>,
-    _author: Signature,
+    parent_hashes: Vec<Hash>,
+    author: Signature,
     _committer: Signature,
 }
 
@@ -87,8 +87,8 @@ impl Commit {
             _message: message,
             tree_hash: *tree.hash(),
             hash,
-            _parent_hashes: parent_hashes,
-            _author: author,
+            parent_hashes,
+            author,
             _committer: committer,
         };
         Ok(commit)
@@ -166,8 +166,8 @@ impl Commit {
         Ok(Self {
             hash,
             tree_hash,
-            _parent_hashes: parent_hashes,
-            _author: author,
+            parent_hashes,
+            author,
             _committer: committer,
             _message: message,
         })
@@ -202,6 +202,14 @@ impl Commit {
 
     pub fn hash(&self) -> &Hash {
         &self.hash
+    }
+
+    pub fn author(&self) -> &Signature {
+        &self.author
+    }
+
+    pub fn parents(&self) -> Result<Vec<Commit>> {
+        self.parent_hashes.iter().map(Commit::load).collect()
     }
 }
 
@@ -290,8 +298,8 @@ mod tests {
 
         assert_eq!("Initial commit", first_commit._message);
 
-        assert_eq!("Larry Sellers", first_commit._author.name());
-        assert_eq!("l.sellers@example.com", first_commit._author.email());
+        assert_eq!("Larry Sellers", first_commit.author.name());
+        assert_eq!("l.sellers@example.com", first_commit.author.email());
 
         assert_eq!("Donny Kerabatsos", first_commit._committer.name());
         assert_eq!("d.kerabatsos@example.com", first_commit._committer.email());
@@ -302,10 +310,10 @@ mod tests {
         let second_commit = Commit::create("Second commit", author, committer)?;
         let second_commit = Commit::load(second_commit.hash())?;
 
-        assert_eq!(1, second_commit._parent_hashes.len());
+        assert_eq!(1, second_commit.parent_hashes.len());
         assert_eq!(
             first_commit.hash(),
-            second_commit._parent_hashes.first().unwrap()
+            second_commit.parent_hashes.first().unwrap()
         );
 
         let second_commit_tree = second_commit.tree()?;

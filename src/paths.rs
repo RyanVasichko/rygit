@@ -33,7 +33,7 @@ pub fn head_ref_path() -> PathBuf {
 
     head_contents.drain(0..5).for_each(drop);
     let head_contents: String = head_contents.into_iter().map(|c| c as char).collect();
-    rygit_path().join(head_contents)
+    rygit_path().join(head_contents.trim())
 }
 
 #[cfg(test)]

@@ -21,6 +21,7 @@ pub enum Commands {
         #[clap(short, long)]
         message: String,
     },
+    Log,
 }
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -32,6 +33,7 @@ pub fn run(cli: Cli) -> Result<()> {
             // TODO: Ensure the current directory is a repo
             commands::commit::run(message)?;
         }
+        Commands::Log => commands::log::run()?,
     }
 
     Ok(())

@@ -93,6 +93,10 @@ impl Signature {
     pub fn email(&self) -> &str {
         &self.email
     }
+
+    pub fn timestamp(&self) -> &DateTime<FixedOffset> {
+        &self.timestamp
+    }
 }
 
 fn format_offset(offset_seconds: i32) -> String {
