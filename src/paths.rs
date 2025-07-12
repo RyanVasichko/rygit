@@ -39,7 +39,6 @@ pub fn head_ref_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use anyhow::{Ok, Result};
-    use serial_test::serial;
     use tempfile::TempDir;
 
     use crate::commands::init;
@@ -47,7 +46,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[serial]
     fn test_head_ref_path() -> Result<()> {
         let dir = TempDir::new()?;
         let path = dir.path().canonicalize().unwrap();

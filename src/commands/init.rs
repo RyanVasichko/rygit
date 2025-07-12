@@ -40,13 +40,11 @@ mod tests {
     use std::{env, fs};
 
     use anyhow::{Ok, Result};
-    use serial_test::serial;
     use tempfile::TempDir;
 
     use super::*;
 
     #[test]
-    #[serial]
     fn test_run_when_already_initialized() -> Result<()> {
         let dir = TempDir::new()?;
         env::set_current_dir(&dir)?;
@@ -58,7 +56,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_run_initializes_ryigit() -> Result<()> {
         let dir = TempDir::new()?;
 

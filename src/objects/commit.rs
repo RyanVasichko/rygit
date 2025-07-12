@@ -223,7 +223,6 @@ mod tests {
     };
 
     use anyhow::{Ok, Result};
-    use serial_test::serial;
     use tempfile::TempDir;
 
     use crate::{
@@ -249,7 +248,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_create_commit() -> Result<()> {
         let repository = TempDir::new()?;
         let path = repository.path().canonicalize().unwrap();
