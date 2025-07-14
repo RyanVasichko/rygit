@@ -1,10 +1,9 @@
-use anyhow::Result;
+use std::env;
+
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use crate::{
-    commands::{self},
-    paths::repository_root_path,
-};
+use crate::commands::{self};
 
 #[derive(Parser)]
 #[command(name = "rygit")]
@@ -27,7 +26,10 @@ pub enum Commands {
 pub fn run(cli: Cli) -> Result<()> {
     match &cli.command {
         Commands::Init => {
-            commands::init::run(repository_root_path())?;
+            let cwd = env::current_dir().context(
+                "Unable to initialize repository. Unable to determine current directory",
+            )?;
+            commands::init::run(cwd)?;
         }
         Commands::Commit { message } => {
             // TODO: Ensure the current directory is a repo
