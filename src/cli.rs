@@ -1,9 +1,12 @@
-use std::env;
+use std::{env, path::Path};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Ok, Result, bail};
 use clap::{Parser, Subcommand};
 
-use crate::commands::{self};
+use crate::{
+    commands::{self},
+    paths::discover_repository_root_from,
+};
 
 #[derive(Parser)]
 #[command(name = "rygit")]
@@ -21,21 +24,50 @@ pub enum Commands {
         message: String,
     },
     Log,
+    Add {
+        #[clap()]
+        path: String,
+    },
 }
 
 pub fn run(cli: Cli) -> Result<()> {
+    let current_dir = env::current_dir().context("Unable to determine current directory")?;
+
+    match cli.command {
+        Commands::Init => {}
+        _ => ensure_rygit_repository(&current_dir)?,
+    }
     match &cli.command {
         Commands::Init => {
-            let cwd = env::current_dir().context(
-                "Unable to initialize repository. Unable to determine current directory",
-            )?;
-            commands::init::run(cwd)?;
+            commands::init::run(current_dir)?;
         }
         Commands::Commit { message } => {
-            // TODO: Ensure the current directory is a repo
             commands::commit::run(message)?;
         }
-        Commands::Log => commands::log::run()?,
+        Commands::Log => {
+            commands::log::run()?;
+        }
+        Commands::Add { path } => {
+            let mut path = Path::new(&path).to_path_buf();
+            if path.is_relative() {
+                let current_dir = env::current_dir()
+                    .context("Unable to add. Unable to determine current directory")?;
+                path = current_dir.join(path);
+            }
+            if !path.exists() {
+                bail!("Cannot add \"{}\", not a valid path", path.display());
+            }
+            commands::add::run(path)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn ensure_rygit_repository(path: impl AsRef<Path>) -> Result<()> {
+    let repo_root = discover_repository_root_from(path);
+    if repo_root.is_err() {
+        bail!("Not inside a repository")
     }
 
     Ok(())

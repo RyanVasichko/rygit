@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, DirEntry, File},
+    fs::{self, File},
     io::{Read, Write},
     iter::Peekable,
     path::Path,
@@ -13,8 +13,9 @@ use strum::{Display, EnumString};
 use crate::{
     compression::{compress, decompress},
     hash::Hash,
+    index::Index,
     objects::{Object, blob::Blob},
-    paths::rygit_path,
+    paths::repository_root_path,
 };
 
 #[derive(Debug, Clone, PartialEq, Display, EnumString)]
@@ -34,7 +35,7 @@ pub struct TreeEntry {
 // entry format:
 // <mode> <file_name>\0<20 byte hash>
 impl TreeEntry {
-    pub fn create(path: impl AsRef<Path>) -> Result<Self> {
+    pub fn create(path: impl AsRef<Path>, index: &Index) -> Result<Self> {
         let path = path.as_ref();
         let name = path
             .file_name()
@@ -43,7 +44,7 @@ impl TreeEntry {
             .with_context(|| format!("File name is not valid UTF-8 for {}", path.display()))?
             .to_owned();
         if path.is_dir() {
-            let directory_tree = Tree::create(path)?;
+            let directory_tree = Tree::create_recursive(path, index)?;
             let entry = TreeEntry {
                 object: Object::Tree(directory_tree),
                 name,
@@ -119,29 +120,22 @@ pub struct Tree {
 }
 
 impl Tree {
-    pub fn create(path: impl AsRef<Path>) -> Result<Self> {
+    pub fn create(index: &Index) -> Result<Self> {
+        let root = repository_root_path();
+        Self::create_recursive(root, index)
+    }
+
+    fn create_recursive(path: impl AsRef<Path>, index: &Index) -> Result<Self> {
         let path = path.as_ref();
-        let mut entries: Vec<TreeEntry> = vec![];
-        let dir_contents = fs::read_dir(path).with_context(|| {
-            format!(
-                "Unable to generate tree. Unable to read directory {}",
-                path.display()
-            )
-        })?;
-        let dir_contents: Vec<DirEntry> = dir_contents.collect::<Result<_, _>>()?;
-        let rygit_path = rygit_path();
-        let mut dir_contents: Vec<_> = dir_contents
+        let mut entry_paths = index.indexed_files_in_directory(path);
+        let mut directories = index.indexed_directories_in_directory(path)?;
+        entry_paths.append(&mut directories);
+        let mut entries: Vec<_> = entry_paths
             .iter()
-            .filter(|d| d.path() != rygit_path)
-            .collect();
-        dir_contents.sort_by(|a, b| {
-            a.file_name()
-                .to_string_lossy()
-                .cmp(&b.file_name().to_string_lossy())
-        });
-        for entry in dir_contents {
-            entries.push(TreeEntry::create(entry.path())?);
-        }
+            .map(|entry_path| TreeEntry::create(entry_path, index))
+            .collect::<Result<_, _>>()?;
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+
         let serialized_data = serialize(&entries);
         let hash = Hash::of(&serialized_data);
 
@@ -234,4 +228,75 @@ fn parse_header(serialized_data_iter: &mut Peekable<vec::IntoIter<u8>>) -> Resul
         .take_while(|&c| c != b'\0')
         .for_each(drop);
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        env,
+        fs::{self, File},
+        io::Write,
+    };
+
+    use anyhow::Result;
+    use tempfile::TempDir;
+
+    use crate::commands;
+
+    use super::*;
+
+    #[test]
+    fn test_from_index() -> Result<()> {
+        let dir = TempDir::new()?;
+        let repository_path = dir.path().canonicalize()?;
+        env::set_current_dir(&repository_path)?;
+
+        commands::init::run(&repository_path)?;
+
+        let file_a_path = repository_path.join("a.txt");
+        File::create(&file_a_path)?;
+
+        let file_b_path = repository_path.join("b.txt");
+        File::create(&file_b_path)?;
+
+        let subdir1_path = repository_path.join("subdir1");
+        fs::create_dir_all(&subdir1_path)?;
+
+        let file_c_path = subdir1_path.join("c.txt");
+        fs::create_dir_all(&subdir1_path)?;
+        File::create(&file_c_path)?.write_all(b"c")?;
+
+        let mut index = Index::load()?;
+        index.add(&file_a_path)?;
+        index.add(&file_b_path)?;
+        index.add(&file_c_path)?;
+
+        let tree = Tree::create(&index)?;
+
+        // println!("{:#?}", tree.entries());
+        assert_eq!(3, tree.entries().len());
+        let mut entries_iter = tree.entries().iter();
+
+        let entry = entries_iter.next().unwrap();
+        assert!(matches!(entry.object(), Object::Blob(_)));
+        assert_eq!("a.txt", entry.name);
+
+        let entry = entries_iter.next().unwrap();
+        assert!(matches!(entry.object(), Object::Blob(_)));
+        assert_eq!("b.txt", entry.name);
+
+        let entry = entries_iter.next().unwrap();
+        if let Object::Tree(subtree) = entry.object() {
+            assert_eq!(1, subtree.entries().len());
+            let entry = subtree.entries().first().unwrap();
+            assert_eq!("c.txt", entry.name);
+        } else {
+            bail!(
+                "Expected entry to be a tree but got {}",
+                entry.object.as_ref()
+            );
+        }
+
+        Ok(())
+    }
 }

@@ -8,11 +8,12 @@ use anyhow::{Context, Result, bail};
 use crate::{
     compression::{compress, decompress},
     hash::Hash,
+    index::Index,
     objects::{
         signature::{Signature, SignatureKind},
         tree::Tree,
     },
-    paths::{head_ref_path, repository_root_path},
+    paths::head_ref_path,
 };
 
 // commit format:
@@ -35,25 +36,23 @@ pub struct Commit {
 
 impl Commit {
     pub fn create(
+        index: &Index,
         message: impl Into<String>,
         author: Signature,
         committer: Signature,
     ) -> Result<Self> {
-        let repository_root_path = repository_root_path();
         let mut parent_hashes: Vec<Hash> = vec![];
-        let mut head_ref_contents = vec![];
+        let mut head_ref_contents = String::new();
         File::open(head_ref_path())
             .context("Unable to create commit. Unable to open head ref")?
-            .read_to_end(&mut head_ref_contents)
+            .read_to_string(&mut head_ref_contents)
             .context("Unable to create commit. Unable to read head ref")?;
         if !head_ref_contents.is_empty() {
-            let head_ref_contents = String::from_utf8(head_ref_contents)
-                .context("Unable to create commit. head ref is not valid UTF8")?;
             let head_ref_hash = Hash::from_hex(&head_ref_contents)
                 .context("Unable to create commit. head ref is not a valid hash")?;
             parent_hashes.push(head_ref_hash);
         }
-        let tree = Tree::create(repository_root_path)?;
+        let tree = Tree::create(index)?;
         let message: String = message.into();
 
         let serialized_data =
@@ -250,22 +249,25 @@ mod tests {
     #[test]
     fn test_create_commit() -> Result<()> {
         let repository = TempDir::new()?;
-        let path = repository.path().canonicalize().unwrap();
-        env::set_current_dir(&path)?;
+        let repository_path = repository.path().canonicalize().unwrap();
+        env::set_current_dir(&repository_path)?;
 
-        init::run(&path)?;
+        init::run(&repository_path)?;
 
-        create_test_file(path.join("a.txt"), b"a")?;
-        create_test_file(path.join("b.txt"), b"b")?;
+        create_test_file(repository_path.join("a.txt"), b"a")?;
+        create_test_file(repository_path.join("b.txt"), b"b")?;
 
-        let subdir_path = path.join("subdir");
+        let subdir_path = repository_path.join("subdir");
         fs::create_dir(&subdir_path)?;
 
         create_test_file(subdir_path.join("c.txt"), b"c")?;
 
         let author = Signature::new("Larry Sellers", "l.sellers@example.com");
         let committer = Signature::new("Donny Kerabatsos", "d.kerabatsos@example.com");
-        let first_commit = Commit::create("Initial commit", author, committer)?;
+
+        let mut index = Index::load()?;
+        index.add(&repository_path)?;
+        let first_commit = Commit::create(&index, "Initial commit", author, committer)?;
         let first_commit = Commit::load(first_commit.hash())?;
 
         let tree = first_commit.tree()?;
@@ -302,10 +304,11 @@ mod tests {
         assert_eq!("Donny Kerabatsos", first_commit._committer.name());
         assert_eq!("d.kerabatsos@example.com", first_commit._committer.email());
 
-        create_test_file(path.join("t.txt"), b"t")?;
+        create_test_file(repository_path.join("t.txt"), b"t")?;
         let author = Signature::new("Leroy Jenkins", "l.jenkins@example.com");
         let committer = Signature::new("Larry Sellers", "l.sellers@example.com");
-        let second_commit = Commit::create("Second commit", author, committer)?;
+        index.add(&repository_path)?;
+        let second_commit = Commit::create(&index, "Second commit", author, committer)?;
         let second_commit = Commit::load(second_commit.hash())?;
 
         assert_eq!(1, second_commit.parent_hashes.len());

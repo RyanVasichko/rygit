@@ -20,6 +20,9 @@ pub fn run(path: impl AsRef<Path>) -> Result<()> {
         .context("Unable to initialize rygit, unable to create .rygit/HEAD")?
         .write_all(b"ref: refs/heads/master")?;
 
+    File::create(rygit_dir.join("index"))
+        .context("Unable to initialize rygit, unable to create .rygit/index")?;
+
     let refs_path = rygit_dir.join("refs");
     fs::create_dir(&refs_path)
         .context("Unable to initialize rygit, unable to create .rygit/refs directory")?;
@@ -70,6 +73,12 @@ mod tests {
         assert!(head_initialized);
         let head_contents = fs::read_to_string(&head_path)?;
         assert_eq!("ref: refs/heads/master", head_contents);
+
+        let index_path = rygit_path.join("index");
+        let index_initialized = index_path.exists() && index_path.is_file();
+        assert!(index_initialized);
+        let index_contents = fs::read_to_string(index_path)?;
+        assert!(index_contents.is_empty());
 
         let refs_path = rygit_path.join("refs");
         let refs_initialized = refs_path.exists() && refs_path.is_dir();

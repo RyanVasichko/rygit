@@ -6,6 +6,7 @@ pub mod cli;
 pub mod commands;
 pub mod compression;
 pub mod hash;
+pub mod index;
 pub mod objects;
 pub mod paths;
 

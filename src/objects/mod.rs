@@ -1,3 +1,5 @@
+use strum::AsRefStr;
+
 use crate::{
     hash::Hash,
     objects::{blob::Blob, tree::Tree},
@@ -8,7 +10,7 @@ pub mod commit;
 pub mod signature;
 pub mod tree;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, AsRefStr)]
 pub enum Object {
     Blob(Blob),
     Tree(Tree),

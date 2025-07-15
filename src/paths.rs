@@ -1,4 +1,10 @@
-use std::{env, fs::File, io::Read, path::PathBuf, sync::OnceLock};
+use std::{
+    env,
+    fs::File,
+    io::Read,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
 use anyhow::{Result, bail};
 
@@ -7,22 +13,23 @@ static REPOSITORY_ROOT_PATH: OnceLock<PathBuf> = OnceLock::new();
 pub fn repository_root_path() -> PathBuf {
     REPOSITORY_ROOT_PATH
         .get_or_init(|| {
-            discover_repository_root()
+            let current_dir = env::current_dir().unwrap();
+            discover_repository_root_from(current_dir)
                 .expect("Failed to find repository root. Make sure you're in a rygit repository.")
         })
         .clone()
 }
 
-fn discover_repository_root() -> Result<PathBuf> {
-    let mut current_dir = env::current_dir()?;
+pub fn discover_repository_root_from(path: impl AsRef<Path>) -> Result<PathBuf> {
+    let mut path = path.as_ref();
 
     loop {
-        let rygit_path = current_dir.join(".rygit");
+        let rygit_path = path.join(".rygit");
         if rygit_path.exists() && rygit_path.is_dir() {
-            return Ok(current_dir);
+            return Ok(path.to_path_buf());
         } else {
-            match current_dir.parent() {
-                Some(parent) => current_dir = parent.to_path_buf(),
+            match path.parent() {
+                Some(parent) => path = parent,
                 None => bail!("Not in a rygit repository (or any parent directories)"),
             }
         }
@@ -43,6 +50,10 @@ pub fn refs_path() -> PathBuf {
 
 pub fn head_path() -> PathBuf {
     rygit_path().join("HEAD")
+}
+
+pub fn index_path() -> PathBuf {
+    rygit_path().join("index")
 }
 
 pub fn head_ref_path() -> PathBuf {
