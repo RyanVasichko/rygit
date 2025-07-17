@@ -233,25 +233,20 @@ fn parse_header(serialized_data_iter: &mut Peekable<vec::IntoIter<u8>>) -> Resul
 #[cfg(test)]
 mod test {
     use std::{
-        env,
         fs::{self, File},
         io::Write,
     };
 
     use anyhow::Result;
-    use tempfile::TempDir;
+    
 
-    use crate::commands;
+    use crate::test_utils::setup_test_repository;
 
     use super::*;
 
     #[test]
     fn test_from_index() -> Result<()> {
-        let dir = TempDir::new()?;
-        let repository_path = dir.path().canonicalize()?;
-        env::set_current_dir(&repository_path)?;
-
-        commands::init::run(&repository_path)?;
+        let (repository_path, _temp_dir) = setup_test_repository()?;
 
         let file_a_path = repository_path.join("a.txt");
         File::create(&file_a_path)?;

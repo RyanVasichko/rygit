@@ -74,23 +74,20 @@ pub fn head_ref_path() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    
 
     use anyhow::{Ok, Result};
-    use tempfile::TempDir;
+    
 
-    use crate::commands::init;
+    use crate::test_utils::setup_test_repository;
 
     use super::*;
 
     #[test]
     fn test_head_ref_path() -> Result<()> {
-        let dir = TempDir::new()?;
-        let path = dir.path().canonicalize().unwrap();
-        env::set_current_dir(&path)?;
-        init::run(&dir)?;
+        let (repository_path, _temp_dir) = setup_test_repository()?;
 
-        let expected = path
+        let expected = repository_path
             .join(".rygit")
             .join("refs")
             .join("heads")
@@ -102,16 +99,9 @@ mod tests {
 
     #[test]
     fn test_discover_root_paths_finds_rygit_dir() -> Result<()> {
-        let dir = TempDir::new()?;
-        let path = dir.path();
-        let subdir_path = path.join("subdir");
-        fs::create_dir_all(&subdir_path)?;
+        let (repository_path, _temp_dir) = setup_test_repository()?;
 
-        init::run(&dir)?;
-        env::set_current_dir(subdir_path)?;
-
-        let repository_root_path = repository_root_path().canonicalize()?;
-        assert_eq!(path.canonicalize()?, repository_root_path);
+        assert_eq!(repository_path, repository_root_path());
 
         Ok(())
     }

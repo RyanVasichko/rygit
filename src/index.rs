@@ -173,25 +173,21 @@ impl IndexFile {
 #[cfg(test)]
 mod tests {
     use std::{
-        env,
         fs::{self, File},
         io::Write,
     };
 
-    use tempfile::TempDir;
+    
 
     use anyhow::{Ok, Result};
 
-    use crate::commands;
+    use crate::test_utils::setup_test_repository;
 
     use super::*;
 
     #[test]
     fn test_add() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let repository_path = temp_dir.path().canonicalize()?;
-        commands::init::run(&repository_path)?;
-        env::set_current_dir(&temp_dir)?;
+        let (repository_path, _temp_dir) = setup_test_repository()?;
 
         let file_a_path = repository_path.join("a.txt");
         File::create(&file_a_path)?.write_all(b"a")?;

@@ -9,6 +9,8 @@ pub mod hash;
 pub mod index;
 pub mod objects;
 pub mod paths;
+#[cfg(test)]
+pub mod test_utils;
 
 fn main() {
     let cli = Cli::parse();

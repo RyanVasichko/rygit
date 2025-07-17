@@ -40,19 +40,19 @@ pub fn run(path: impl AsRef<Path>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs};
+    use std::fs;
 
     use anyhow::{Ok, Result};
     use tempfile::TempDir;
+
+    use crate::test_utils::setup_test_repository;
 
     use super::*;
 
     #[test]
     fn test_run_when_already_initialized() -> Result<()> {
-        let dir = TempDir::new()?;
-        env::set_current_dir(&dir)?;
-        fs::create_dir(dir.path().join(".rygit"))?;
-        let result = run(dir);
+        let (repository_path, _) = setup_test_repository()?;
+        let result = run(&repository_path);
         assert!(result.is_err());
 
         Ok(())

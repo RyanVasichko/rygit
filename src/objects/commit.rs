@@ -215,19 +215,18 @@ impl Commit {
 #[cfg(test)]
 mod tests {
     use std::{
-        env,
         fs::{self, File},
         io::{Read, Write},
         path::Path,
     };
 
     use anyhow::{Ok, Result};
-    use tempfile::TempDir;
+    
 
     use crate::{
-        commands::init,
         objects::{Object, tree::TreeEntry},
         paths::head_ref_path,
+        test_utils::setup_test_repository,
     };
 
     use super::*;
@@ -248,11 +247,7 @@ mod tests {
 
     #[test]
     fn test_create_commit() -> Result<()> {
-        let repository = TempDir::new()?;
-        let repository_path = repository.path().canonicalize().unwrap();
-        env::set_current_dir(&repository_path)?;
-
-        init::run(&repository_path)?;
+        let (repository_path, _tempdir) = setup_test_repository()?;
 
         create_test_file(repository_path.join("a.txt"), b"a")?;
         create_test_file(repository_path.join("b.txt"), b"b")?;
