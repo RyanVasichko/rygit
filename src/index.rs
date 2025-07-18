@@ -172,61 +172,45 @@ impl IndexFile {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs::{self, File},
-        io::Write,
-    };
-
-    
 
     use anyhow::{Ok, Result};
 
-    use crate::test_utils::setup_test_repository;
+    use crate::test_utils::TestRepo;
 
     use super::*;
 
     #[test]
     fn test_add() -> Result<()> {
-        let (repository_path, _temp_dir) = setup_test_repository()?;
-
-        let file_a_path = repository_path.join("a.txt");
-        File::create(&file_a_path)?.write_all(b"a")?;
-        let file_a_path = file_a_path.canonicalize()?;
-
-        let file_b_path = repository_path.join("b.txt");
-        File::create(&file_b_path)?.write_all(b"b")?;
-
-        let subdir1_path = repository_path.join("subdir1");
-        fs::create_dir_all(&subdir1_path)?;
-
-        let file_c_path = subdir1_path.join("c.txt");
-        File::create(&file_c_path)?.write_all(b"c")?;
-
-        let subdir2_path = repository_path.join("subdir2");
-        fs::create_dir_all(&subdir2_path)?;
-
-        let file_d_path = subdir2_path.join("d.txt");
-        File::create(&file_d_path)?.write_all(b"d")?;
-        let file_e_path = subdir2_path.join("e.txt");
-        File::create(&file_e_path)?.write_all(b"e")?;
+        let repo = TestRepo::new()?
+            .file("a.txt", "a")?
+            .file("b.txt", "b")?
+            .file("subdir1/c.txt", "c")?
+            .file("subdir2/d.txt", "d")?
+            .file("subdir2/e.txt", "e")?;
 
         let mut index = Index::load()?;
-        index.add(&file_a_path)?;
+        index.add(repo.path().join("a.txt"))?;
 
         assert_eq!(1, index.files.len());
         let indexed_file_paths: HashSet<_> = index.files.iter().map(|f| &f.path).collect();
-        assert!(indexed_file_paths.contains(&file_a_path));
+        assert!(indexed_file_paths.contains(&repo.path().join("a.txt")));
 
         let mut index = Index::load()?;
-        assert!(indexed_file_paths.contains(&file_a_path));
+        assert!(indexed_file_paths.contains(&repo.path().join("a.txt")));
 
-        index.add(subdir1_path)?;
-        index.add(&file_e_path)?;
+        index.add(repo.path().join("subdir1"))?;
+        index.add(repo.path().join("subdir2/e.txt"))?;
         assert_eq!(3, index.files.len());
         let mut files_iter = index.files.iter();
-        assert_eq!(file_a_path, files_iter.next().unwrap().path);
-        assert_eq!(file_c_path, files_iter.next().unwrap().path);
-        assert_eq!(file_e_path, files_iter.next().unwrap().path);
+        assert_eq!(repo.path().join("a.txt"), files_iter.next().unwrap().path);
+        assert_eq!(
+            repo.path().join("subdir1/c.txt"),
+            files_iter.next().unwrap().path
+        );
+        assert_eq!(
+            repo.path().join("subdir2/e.txt"),
+            files_iter.next().unwrap().path
+        );
 
         Ok(())
     }

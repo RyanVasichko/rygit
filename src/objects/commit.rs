@@ -215,18 +215,16 @@ impl Commit {
 #[cfg(test)]
 mod tests {
     use std::{
-        fs::{self, File},
-        io::{Read, Write},
-        path::Path,
+        fs::File,
+        io::Read,
     };
 
     use anyhow::{Ok, Result};
-    
 
     use crate::{
         objects::{Object, tree::TreeEntry},
         paths::head_ref_path,
-        test_utils::setup_test_repository,
+        test_utils::TestRepo,
     };
 
     use super::*;
@@ -240,28 +238,18 @@ mod tests {
         }
     }
 
-    fn create_test_file(path: impl AsRef<Path>, content: &[u8]) -> Result<()> {
-        File::create(path.as_ref())?.write_all(content)?;
-        Ok(())
-    }
-
     #[test]
     fn test_create_commit() -> Result<()> {
-        let (repository_path, _tempdir) = setup_test_repository()?;
-
-        create_test_file(repository_path.join("a.txt"), b"a")?;
-        create_test_file(repository_path.join("b.txt"), b"b")?;
-
-        let subdir_path = repository_path.join("subdir");
-        fs::create_dir(&subdir_path)?;
-
-        create_test_file(subdir_path.join("c.txt"), b"c")?;
+        let repo = TestRepo::new()?
+            .file("a.txt", "a")?
+            .file("b.txt", "b")?
+            .file("subdir/c.txt", "c")?;
 
         let author = Signature::new("Larry Sellers", "l.sellers@example.com");
         let committer = Signature::new("Donny Kerabatsos", "d.kerabatsos@example.com");
 
         let mut index = Index::load()?;
-        index.add(&repository_path)?;
+        index.add(repo.path())?;
         let first_commit = Commit::create(&index, "Initial commit", author, committer)?;
         let first_commit = Commit::load(first_commit.hash())?;
 
@@ -299,10 +287,10 @@ mod tests {
         assert_eq!("Donny Kerabatsos", first_commit._committer.name());
         assert_eq!("d.kerabatsos@example.com", first_commit._committer.email());
 
-        create_test_file(repository_path.join("t.txt"), b"t")?;
+        let repo = repo.file("t.txt", "t")?;
         let author = Signature::new("Leroy Jenkins", "l.jenkins@example.com");
         let committer = Signature::new("Larry Sellers", "l.sellers@example.com");
-        index.add(&repository_path)?;
+        index.add(repo.path())?;
         let second_commit = Commit::create(&index, "Second commit", author, committer)?;
         let second_commit = Commit::load(second_commit.hash())?;
 

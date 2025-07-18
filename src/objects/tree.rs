@@ -232,43 +232,27 @@ fn parse_header(serialized_data_iter: &mut Peekable<vec::IntoIter<u8>>) -> Resul
 
 #[cfg(test)]
 mod test {
-    use std::{
-        fs::{self, File},
-        io::Write,
-    };
 
     use anyhow::Result;
-    
 
-    use crate::test_utils::setup_test_repository;
+    use crate::test_utils::TestRepo;
 
     use super::*;
 
     #[test]
     fn test_from_index() -> Result<()> {
-        let (repository_path, _temp_dir) = setup_test_repository()?;
-
-        let file_a_path = repository_path.join("a.txt");
-        File::create(&file_a_path)?;
-
-        let file_b_path = repository_path.join("b.txt");
-        File::create(&file_b_path)?;
-
-        let subdir1_path = repository_path.join("subdir1");
-        fs::create_dir_all(&subdir1_path)?;
-
-        let file_c_path = subdir1_path.join("c.txt");
-        fs::create_dir_all(&subdir1_path)?;
-        File::create(&file_c_path)?.write_all(b"c")?;
+        let repo = TestRepo::new()?
+            .file("a.txt", "a")?
+            .file("b.txt", "b")?
+            .file("subdir1/c.txt", "c")?;
 
         let mut index = Index::load()?;
-        index.add(&file_a_path)?;
-        index.add(&file_b_path)?;
-        index.add(&file_c_path)?;
+        index.add(repo.path().join("a.txt"))?;
+        index.add(repo.path().join("b.txt"))?;
+        index.add(repo.path().join("subdir1/c.txt"))?;
 
         let tree = Tree::create(&index)?;
 
-        // println!("{:#?}", tree.entries());
         assert_eq!(3, tree.entries().len());
         let mut entries_iter = tree.entries().iter();
 

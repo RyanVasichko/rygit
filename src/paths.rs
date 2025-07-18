@@ -74,20 +74,19 @@ pub fn head_ref_path() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    
 
     use anyhow::{Ok, Result};
-    
 
-    use crate::test_utils::setup_test_repository;
+    use crate::test_utils::TestRepo;
 
     use super::*;
 
     #[test]
     fn test_head_ref_path() -> Result<()> {
-        let (repository_path, _temp_dir) = setup_test_repository()?;
+        let repo = TestRepo::new()?;
 
-        let expected = repository_path
+        let expected = repo
+            .path()
             .join(".rygit")
             .join("refs")
             .join("heads")
@@ -99,9 +98,9 @@ mod tests {
 
     #[test]
     fn test_discover_root_paths_finds_rygit_dir() -> Result<()> {
-        let (repository_path, _temp_dir) = setup_test_repository()?;
+        let repo = TestRepo::new()?;
 
-        assert_eq!(repository_path, repository_root_path());
+        assert_eq!(repo.path(), repository_root_path());
 
         Ok(())
     }

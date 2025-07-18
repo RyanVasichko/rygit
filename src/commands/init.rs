@@ -45,14 +45,14 @@ mod tests {
     use anyhow::{Ok, Result};
     use tempfile::TempDir;
 
-    use crate::test_utils::setup_test_repository;
+    use crate::test_utils::TestRepo;
 
     use super::*;
 
     #[test]
     fn test_run_when_already_initialized() -> Result<()> {
-        let (repository_path, _) = setup_test_repository()?;
-        let result = run(&repository_path);
+        let repo = TestRepo::new()?;
+        let result = run(repo.path());
         assert!(result.is_err());
 
         Ok(())
