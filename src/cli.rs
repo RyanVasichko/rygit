@@ -28,6 +28,7 @@ pub enum Commands {
         #[clap()]
         path: String,
     },
+    Status,
 }
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -38,15 +39,9 @@ pub fn run(cli: Cli) -> Result<()> {
         _ => ensure_rygit_repository(&current_dir)?,
     }
     match &cli.command {
-        Commands::Init => {
-            commands::init::run(current_dir)?;
-        }
-        Commands::Commit { message } => {
-            commands::commit::run(message)?;
-        }
-        Commands::Log => {
-            commands::log::run()?;
-        }
+        Commands::Init => commands::init::run(current_dir)?,
+        Commands::Commit { message } => commands::commit::run(message)?,
+        Commands::Log => commands::log::run()?,
         Commands::Add { path } => {
             let mut path = Path::new(&path).to_path_buf();
             if path.is_relative() {
@@ -59,7 +54,8 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             commands::add::run(path)?;
         }
-    }
+        Commands::Status => commands::status::run()?,
+    };
 
     Ok(())
 }

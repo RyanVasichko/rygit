@@ -9,6 +9,7 @@ pub mod hash;
 pub mod index;
 pub mod objects;
 pub mod paths;
+pub mod repository_status;
 #[cfg(test)]
 pub mod test_utils;
 

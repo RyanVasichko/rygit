@@ -1,21 +1,23 @@
 use std::{
+    collections::HashMap,
     fs::{self, File},
     io::{Read, Write},
     iter::Peekable,
-    path::Path,
+    path::{Path, PathBuf},
     str::FromStr,
     vec,
 };
 
 use anyhow::{Context, Result, bail};
 use strum::{Display, EnumString};
+use walkdir::WalkDir;
 
 use crate::{
     compression::{compress, decompress},
     hash::Hash,
     index::Index,
-    objects::{Object, blob::Blob},
-    paths::repository_root_path,
+    objects::{Object, blob::Blob, commit::Commit},
+    paths::{head_ref_path, repository_root_path, rygit_path},
 };
 
 #[derive(Debug, Clone, PartialEq, Display, EnumString)]
@@ -127,12 +129,22 @@ impl Tree {
 
     fn create_recursive(path: impl AsRef<Path>, index: &Index) -> Result<Self> {
         let path = path.as_ref();
-        let mut entry_paths = index.indexed_files_in_directory(path);
-        let mut directories = index.indexed_directories_in_directory(path)?;
-        entry_paths.append(&mut directories);
-        let mut entries: Vec<_> = entry_paths
+        let rygit_path = rygit_path();
+        let directory_contents: Vec<_> = WalkDir::new(path)
+            .min_depth(1)
+            .max_depth(1)
+            .into_iter()
+            .filter_entry(|e| !e.path().starts_with(&rygit_path))
+            .collect::<Result<_, _>>()
+            .with_context(|| {
+                format!(
+                    "Unable to create tree. Unable to read directory contents for {}",
+                    path.display()
+                )
+            })?;
+        let mut entries: Vec<_> = directory_contents
             .iter()
-            .map(|entry_path| TreeEntry::create(entry_path, index))
+            .map(|entry_path| TreeEntry::create(entry_path.path(), index))
             .collect::<Result<_, _>>()?;
         entries.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -140,13 +152,12 @@ impl Tree {
         let hash = Hash::of(&serialized_data);
 
         if !hash.object_path().exists() {
+            let serialized_data = compress(&serialized_data)
+                .context("Unable to generate tree. Unable to compress object.")?;
             fs::create_dir_all(hash.object_path().parent().unwrap())
-                .context("Unable to generate tree. Unable to create parent directory")?;
-            let mut file = File::create(hash.object_path())
+                .and_then(|_| File::create(hash.object_path()))
+                .and_then(|mut file| file.write_all(&serialized_data))
                 .context("Unable to generate tree. Unable to create object file")?;
-            let serialized_data = compress(&serialized_data)?;
-            file.write_all(&serialized_data)
-                .context("Unable to generate tree. Unable to write to object file")?;
         }
 
         Ok(Self { hash, entries })
@@ -174,6 +185,48 @@ impl Tree {
         Ok(contents)
     }
 
+    pub fn current() -> Result<Option<Self>> {
+        let mut head_ref = String::new();
+        File::open(head_ref_path())
+            .and_then(|mut f| f.read_to_string(&mut head_ref))
+            .context("Unable to read head ref")?;
+        if head_ref.is_empty() {
+            return Ok(None);
+        }
+
+        let head_ref_hash = Hash::from_hex(&head_ref)?;
+        let head_commit = Commit::load(&head_ref_hash)?;
+        let current_tree = head_commit.tree()?;
+        Ok(Some(current_tree))
+    }
+
+    pub fn entries_flattened(&self) -> HashMap<PathBuf, Hash> {
+        Tree::entries_flattened_recursive(self.entries(), repository_root_path())
+    }
+
+    fn entries_flattened_recursive(
+        entries: &[TreeEntry],
+        base_path: impl AsRef<Path>,
+    ) -> HashMap<PathBuf, Hash> {
+        let mut collected_entries = HashMap::new();
+        let base_path = base_path.as_ref();
+        for entry in entries {
+            let full_path = base_path.join(&entry.name);
+            match &entry.object {
+                Object::Blob(blob) => {
+                    collected_entries.insert(full_path, *blob.hash());
+                }
+                Object::Tree(tree) => {
+                    let subtree_entries =
+                        Tree::entries_flattened_recursive(tree.entries(), full_path);
+                    collected_entries.extend(subtree_entries);
+                }
+            }
+        }
+
+        collected_entries
+    }
+
     pub fn load(object_path: impl AsRef<Path>) -> Result<Self> {
         let mut file =
             File::open(&object_path).context("Unable to load tree. Object does not exist")?;
@@ -194,6 +247,39 @@ impl Tree {
         }
 
         Ok(Tree { entries, hash })
+    }
+
+    pub fn find(&self, path: impl AsRef<Path>) -> Result<Option<&TreeEntry>> {
+        let mut path = path.as_ref();
+        let repository_root = repository_root_path();
+        if path.starts_with(&repository_root) {
+            path = path.strip_prefix(&repository_root)?;
+        }
+        let mut tree = self;
+
+        let mut components = path.components().peekable();
+        while let Some(component) = components.next() {
+            let name = component.as_os_str().to_string_lossy();
+            let entry = tree.entries.iter().find(|e| e.name == name);
+            let entry = match entry {
+                Some(e) => e,
+                None => return Ok(None),
+            };
+
+            if components.peek().is_none() {
+                match &entry.object {
+                    Object::Blob(_) => return Ok(Some(entry)),
+                    _ => return Ok(None),
+                }
+            }
+
+            match &entry.object {
+                Object::Tree(subtree) => tree = subtree,
+                _ => return Ok(None),
+            }
+        }
+
+        Ok(None)
     }
 }
 
@@ -241,8 +327,8 @@ mod test {
 
     #[test]
     fn test_from_index() -> Result<()> {
-        let repo = TestRepo::new()?
-            .file("a.txt", "a")?
+        let repo = TestRepo::new()?;
+        repo.file("a.txt", "a")?
             .file("b.txt", "b")?
             .file("subdir1/c.txt", "c")?;
 
@@ -275,6 +361,46 @@ mod test {
                 entry.object.as_ref()
             );
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_find() -> Result<()> {
+        let repo = TestRepo::new()?;
+        repo.file("a.txt", "a")?
+            .file("subdir/a.txt", "a")?
+            .file("a/a.txt", "a")?;
+        let mut index = Index::load()?;
+        index.add(repo.path().join("a.txt"))?;
+        index.add(repo.path().join("a/a.txt"))?;
+        index.add(repo.path().join("subdir/a.txt"))?;
+
+        let tree = Tree::create(&index)?;
+
+        assert!(tree.find("a.txt")?.is_some());
+        assert!(tree.find("a/a.txt")?.is_some());
+        assert!(tree.find("subdir/a.txt")?.is_some());
+        assert!(tree.find("b.pdf")?.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_flattened() -> Result<()> {
+        let repo = TestRepo::new()?;
+        repo.file("a.txt", "a")?
+            .file("a/a.txt", "b")?
+            .file("b/b.txt", "b")?
+            .stage(".")?
+            .commit("Initial commit")?;
+        let tree = Tree::current()?.unwrap();
+        let flattened = tree.entries_flattened();
+
+        assert_eq!(3, flattened.len());
+        assert!(flattened.contains_key(&repo.path().join("a.txt")));
+        assert!(flattened.contains_key(&repo.path().join("a/a.txt")));
+        assert!(flattened.contains_key(&repo.path().join("b/b.txt")));
 
         Ok(())
     }

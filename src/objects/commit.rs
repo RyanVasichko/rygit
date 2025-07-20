@@ -214,10 +214,7 @@ impl Commit {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs::File,
-        io::Read,
-    };
+    use std::{fs::File, io::Read};
 
     use anyhow::{Ok, Result};
 
@@ -240,8 +237,8 @@ mod tests {
 
     #[test]
     fn test_create_commit() -> Result<()> {
-        let repo = TestRepo::new()?
-            .file("a.txt", "a")?
+        let repo = TestRepo::new()?;
+        repo.file("a.txt", "a")?
             .file("b.txt", "b")?
             .file("subdir/c.txt", "c")?;
 

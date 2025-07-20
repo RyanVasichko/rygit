@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use walkdir::WalkDir;
 
 use crate::{
     hash::Hash,
@@ -42,7 +43,11 @@ impl Index {
     }
 
     pub fn add(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
         self.add_recursive(path)?;
+        if path.is_dir() {
+            self.remove_deleted_files(path);
+        }
         self.files.sort_by(|a, b| a.path.cmp(&b.path));
         self.write()
     }
@@ -57,17 +62,27 @@ impl Index {
 
     fn add_file(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
-        if !path.is_file() {
-            bail!("Unable to add {}. Not a file", path.display());
+        let file_position = self.files.iter().position(|f| f.path == path);
+
+        if !path.exists() {
+            if let Some(pos) = file_position.as_ref() {
+                self.files.remove(*pos);
+                return Ok(());
+            } else {
+                let relative_path = path.strip_prefix(repository_root_path())?;
+                bail!(
+                    "Unable to add {}. Did not match any files",
+                    relative_path.display()
+                )
+            }
         }
 
         let blob = Blob::create(path)?;
-        let position = self.files.iter().position(|f| f.path == path);
         let index_file = IndexFile {
             path: path.to_path_buf(),
             hash: *blob.hash(),
         };
-        if let Some(position) = position {
+        if let Some(position) = file_position {
             self.files[position] = index_file;
         } else {
             self.files.push(index_file);
@@ -83,21 +98,28 @@ impl Index {
         }
 
         let rygit_path = rygit_path();
-        if path == rygit_path || path.starts_with(rygit_path) {
-            return Ok(());
-        }
-
-        let readdir = path.read_dir().with_context(|| {
-            format!("Unable to add {}. Unable to read directory", path.display())
-        })?;
-        for file in readdir {
-            let file = file.with_context(|| {
+        let entries = WalkDir::new(path)
+            .min_depth(1)
+            .into_iter()
+            .filter_entry(|e| !e.path().starts_with(&rygit_path));
+        for entry in entries {
+            let entry = entry.with_context(|| {
                 format!("Unable to add {}. Unable to read file", path.display())
             })?;
-            self.add(file.path())?;
+            self.add_recursive(entry.path())?
         }
 
         Ok(())
+    }
+
+    fn remove_deleted_files(&mut self, path: &Path) {
+        self.files.retain(|f| {
+            if !f.path.starts_with(path) {
+                return true;
+            }
+
+            f.path.exists()
+        });
     }
 
     fn write(&self) -> Result<()> {
@@ -153,6 +175,10 @@ impl Index {
         let indexed_directories = indexed_directories.into_iter().collect();
         Ok(indexed_directories)
     }
+
+    pub fn files(&self) -> &Vec<IndexFile> {
+        &self.files
+    }
 }
 
 pub struct IndexFile {
@@ -181,8 +207,8 @@ mod tests {
 
     #[test]
     fn test_add() -> Result<()> {
-        let repo = TestRepo::new()?
-            .file("a.txt", "a")?
+        let repo = TestRepo::new()?;
+        repo.file("a.txt", "a")?
             .file("b.txt", "b")?
             .file("subdir1/c.txt", "c")?
             .file("subdir2/d.txt", "d")?
@@ -211,6 +237,22 @@ mod tests {
             repo.path().join("subdir2/e.txt"),
             files_iter.next().unwrap().path
         );
+
+        repo.remove_file("a.txt")?
+            .remove_file("subdir1/c.txt")?
+            .stage(".")?;
+        let index = Index::load()?;
+        let file_a_present = index
+            .files()
+            .iter()
+            .any(|f| f.path == repo.path().join("a.txt"));
+        assert!(!file_a_present);
+
+        let file_c_present = index
+            .files()
+            .iter()
+            .any(|f| f.path == repo.path().join("subdir1/c.txt"));
+        assert!(!file_c_present);
 
         Ok(())
     }

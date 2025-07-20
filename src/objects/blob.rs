@@ -19,15 +19,16 @@ pub struct Blob {
 }
 
 impl Blob {
-    pub fn create(_path: impl AsRef<Path>) -> Result<Self> {
-        let file_path = _path.as_ref();
-        let serialized_data = serialize(file_path).with_context(|| {
-            format!(
-                "Unable to create blob contents for file {}",
-                file_path.display()
-            )
-        })?;
-        let hash = Hash::of(&serialized_data);
+    pub fn hash_for(path: impl AsRef<Path>) -> Result<Hash> {
+        let path = path.as_ref();
+        let (_, hash) = serialize_and_hash(path)?;
+
+        Ok(hash)
+    }
+
+    pub fn create(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let (serialized_data, hash) = serialize_and_hash(path)?;
         let serialized_data = compress(&serialized_data)?;
         let object_path = hash.object_path();
         if !object_path.try_exists().unwrap() {
@@ -78,4 +79,13 @@ fn serialize(file_path: &Path) -> Result<Vec<u8>> {
     blob.extend_from_slice(&file_contents);
 
     Ok(blob)
+}
+
+fn serialize_and_hash(path: impl AsRef<Path>) -> Result<(Vec<u8>, Hash)> {
+    let path = path.as_ref();
+    let serialized_data = serialize(path)
+        .with_context(|| format!("Unable to create blob contents for file {}", path.display()))?;
+    let hash = Hash::of(&serialized_data);
+
+    Ok((serialized_data, hash))
 }
