@@ -1,11 +1,12 @@
 use std::fs;
 
-use anyhow::{Context, Ok, Result};
+use anyhow::{Context, Ok, Result, bail};
 use walkdir::WalkDir;
 
 use crate::{
     hash::Hash,
-    paths::{head_path, head_ref_path, refs_path},
+    objects::{blob::Blob, commit::Commit, tree::Tree},
+    paths::{head_path, head_ref_path, refs_path, repository_root_path, rygit_path},
 };
 
 pub struct Branch {
@@ -39,6 +40,20 @@ impl Branch {
         Ok(branch)
     }
 
+    pub fn find_by_name(name: impl Into<String>) -> Result<Self> {
+        let name = name.into();
+        let ref_path = refs_path().join("heads").join(&name);
+        if !ref_path.exists() {
+            bail!("{name} not a branch");
+        }
+
+        let commit_hash = fs::read_to_string(&ref_path).context("Unable to read branch ref")?;
+        let commit_hash = Hash::from_hex(&commit_hash)
+            .context("Unable to load branch. Commit hash is not a valid hash")?;
+
+        Ok(Self { name, commit_hash })
+    }
+
     pub fn list() -> Result<Vec<Branch>> {
         let branches_path = refs_path().join("heads");
         let branches: Vec<_> = WalkDir::new(&branches_path)
@@ -65,6 +80,45 @@ impl Branch {
     pub fn name(&self) -> &str {
         &self.name
     }
+
+    pub fn switch(name: impl Into<String>) -> Result<()> {
+        let name = name.into();
+        let directory_contents =
+            fs::read_dir(repository_root_path()).context("Unable to read repository contents")?;
+        let rygit_path = rygit_path();
+        for entry in directory_contents {
+            let entry = entry.context("Unable to read repository contents")?;
+            let path = entry.path();
+            if path.starts_with(&rygit_path) {
+                continue;
+            }
+
+            if path.is_file() {
+                fs::remove_file(&path)
+                    .with_context(|| format!("Unable to remove file {}", path.display()))?;
+            } else if path.is_dir() {
+                fs::remove_dir_all(&path)
+                    .with_context(|| format!("Unable to remove directory {}", path.display()))?;
+            }
+        }
+
+        let branch = Branch::find_by_name(&name)?;
+        let commit = branch.commit()?;
+        let tree = commit.tree()?;
+        for (entry_path, entry_hash) in tree.entries_flattened() {
+            let blob = Blob::load(entry_hash.object_path())?;
+            let body = blob.body()?.iter().map(|&c| c as char).collect::<String>();
+            fs::write(entry_path, body)?;
+        }
+
+        fs::write(head_path(), format!("ref: refs/heads/{name}"))?;
+
+        Ok(())
+    }
+
+    fn commit(&self) -> Result<Commit> {
+        Commit::load(&self.commit_hash)
+    }
 }
 
 #[cfg(test)]
@@ -83,9 +137,10 @@ mod tests {
 
         repo.file("a.txt", "a")?
             .stage(".")?
-            .commit("Initial commit")?;
-        let branch = Branch::current();
-        assert!(branch.is_ok());
+            .commit("Initial commit")?
+            .branch("test")?;
+        let branch = Branch::current()?;
+        assert_eq!("master", branch.name);
 
         Ok(())
     }
@@ -98,9 +153,24 @@ mod tests {
 
         repo.file("a.txt", "a")?
             .stage(".")?
-            .commit("Initial commit")?;
-        let branch = Branch::create("test")?;
-        assert_eq!("test", branch.name);
+            .commit("Initial commit")?
+            .branch("test")?;
+        let initial_commit_hash = fs::read_to_string(head_ref_path())?;
+        let initial_commit_hash = Hash::from_hex(&initial_commit_hash)?;
+
+        repo.file("b.txt", "b")?
+            .stage(".")?
+            .commit("Second commit")?;
+        let second_commit_hash = fs::read_to_string(head_ref_path())?;
+        let second_commit_hash = Hash::from_hex(&second_commit_hash)?;
+
+        let test_branch = Branch::find_by_name("test")?;
+        assert_eq!("test", test_branch.name);
+        assert_eq!(initial_commit_hash, test_branch.commit_hash);
+
+        let master_branch = Branch::find_by_name("master")?;
+        assert_eq!("master", master_branch.name);
+        assert_eq!(second_commit_hash, master_branch.commit_hash);
 
         let branches = Branch::list()?;
         assert_eq!(2, branches.len());
@@ -108,5 +178,38 @@ mod tests {
         assert!(branches.iter().any(|b| b.name == "test"));
 
         Ok(())
+    }
+
+    #[test]
+    fn test_switch() -> Result<()> {
+        let repo = TestRepo::new()?;
+        repo.file("a.txt", "a")?
+            .stage(".")?
+            .commit("Initial commit")?;
+
+        repo.branch("test")?
+            .switch("test")?
+            .file("b.txt", "b")?
+            .stage(".")?
+            .commit("Commit on test")?;
+
+        let file_b_path = repo.path().join("b.txt");
+        assert_eq!("test", Branch::current()?.name);
+        assert!(file_b_path.exists());
+
+        repo.switch("master")?;
+        assert_eq!("master", Branch::current()?.name);
+        assert!(!file_b_path.exists());
+        assert_eq!("a", fs::read_to_string(repo.path().join("a.txt"))?);
+
+        repo.switch("test")?;
+        assert_eq!("test", Branch::current()?.name);
+        assert!(file_b_path.exists());
+        assert_eq!("b", fs::read_to_string(&file_b_path)?);
+        assert_eq!("a", fs::read_to_string(repo.path().join("a.txt"))?);
+
+        todo!("test subdirectories");
+
+        todo!("How to handle uncommitted files when switching branches?");
     }
 }

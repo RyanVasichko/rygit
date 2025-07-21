@@ -8,7 +8,7 @@ use std::{
 use anyhow::Result;
 use tempfile::TempDir;
 
-use crate::commands;
+use crate::{branch::Branch, commands};
 
 pub struct TestRepo {
     _temp_dir: TempDir,
@@ -60,6 +60,16 @@ impl TestRepo {
 
     pub fn commit(&self, message: impl Into<String>) -> Result<&Self> {
         commands::commit::run(message)?;
+        Ok(self)
+    }
+
+    pub fn branch(&self, name: impl Into<String>) -> Result<&Self> {
+        Branch::create(name)?;
+        Ok(self)
+    }
+
+    pub fn switch(&self, branch_name: impl Into<String>) -> Result<&Self> {
+        Branch::switch(branch_name)?;
         Ok(self)
     }
 
