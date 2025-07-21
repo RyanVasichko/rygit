@@ -91,7 +91,6 @@ impl Commit {
             fs::read(commit_path).context("Unable to load commit. Unable to read object file")?;
         let contents =
             decompress(&contents).context("Unable to load commit. Unable to decompress object")?;
-        let string_contents = contents.iter().map(|&c| c as char).collect::<String>();
         Commit::deserialize(contents)
     }
 

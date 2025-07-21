@@ -5,7 +5,7 @@ use walkdir::WalkDir;
 
 use crate::{
     hash::Hash,
-    objects::{blob::Blob, commit::Commit, tree::Tree},
+    objects::{blob::Blob, commit::Commit},
     paths::{head_path, head_ref_path, refs_path, repository_root_path, rygit_path},
 };
 
