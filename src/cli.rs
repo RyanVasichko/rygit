@@ -29,6 +29,9 @@ pub enum Commands {
         path: String,
     },
     Status,
+    Branch {
+        name: Option<String>,
+    },
 }
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -55,6 +58,13 @@ pub fn run(cli: Cli) -> Result<()> {
             commands::add::run(path)?;
         }
         Commands::Status => commands::status::run()?,
+        Commands::Branch { name } => {
+            if let Some(name) = name {
+                commands::branch::create(name)?
+            } else {
+                commands::branch::list()?
+            }
+        }
     };
 
     Ok(())

@@ -39,7 +39,7 @@ impl Branch {
         Ok(branch)
     }
 
-    fn list() -> Result<Vec<Branch>> {
+    pub fn list() -> Result<Vec<Branch>> {
         let branches_path = refs_path().join("heads");
         let branches: Vec<_> = WalkDir::new(&branches_path)
             .min_depth(1)
@@ -60,6 +60,10 @@ impl Branch {
             .collect::<Result<_, _>>()?;
 
         Ok(branches)
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 
