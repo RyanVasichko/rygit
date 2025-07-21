@@ -33,11 +33,9 @@ impl Blob {
         let object_path = hash.object_path();
         if !object_path.try_exists().unwrap() {
             fs::create_dir_all(object_path.parent().unwrap())
-                .context("Unable to generate blob. Unable to create parent directory")?;
-            let mut file = File::create(&object_path)
+                .and_then(|_| File::create(&object_path))
+                .and_then(|mut file| file.write_all(&serialized_data))
                 .context("Unable to generate blob. Unable to create object file")?;
-            file.write_all(&serialized_data)
-                .context("Unable to generate blob. Unable to write object file")?;
         }
 
         Ok(Self { hash })

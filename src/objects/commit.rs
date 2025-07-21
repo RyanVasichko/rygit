@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{Read, Write},
 };
 
@@ -44,8 +44,7 @@ impl Commit {
         let mut parent_hashes: Vec<Hash> = vec![];
         let mut head_ref_contents = String::new();
         File::open(head_ref_path())
-            .context("Unable to create commit. Unable to open head ref")?
-            .read_to_string(&mut head_ref_contents)
+            .and_then(|mut file| file.read_to_string(&mut head_ref_contents))
             .context("Unable to create commit. Unable to read head ref")?;
         if !head_ref_contents.is_empty() {
             let head_ref_hash = Hash::from_hex(&head_ref_contents)
@@ -66,21 +65,14 @@ impl Commit {
             fs::create_dir_all(parent)
                 .context("Unable to create commit. Unable to create object file")?;
         }
-        let mut commit_object_file = File::create(hash.object_path())
-            .context("Unable to create commit. Unable to create object file")?;
-        commit_object_file
-            .write_all(&serialized_data)
+
+        File::create(hash.object_path())
+            .and_then(|mut file| file.write_all(&serialized_data))
             .context("Unable to create commit. Unable to write to object file")?;
 
-        let mut head_ref_file = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .create(true)
-            .open(head_ref_path())
-            .context("Unable to create commit. Unable to open head ref")?;
-        head_ref_file
-            .write_all(hash.to_hex().as_bytes())
-            .context("Unable to create commit. Unable to open head ref")?;
+        File::create(head_ref_path())
+            .and_then(|mut file| file.write_all(hash.to_hex().as_bytes()))
+            .context("Unable to create commit. Unable to write head ref")?;
 
         let commit = Self {
             _message: message,

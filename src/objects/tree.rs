@@ -42,9 +42,8 @@ impl TreeEntry {
         let name = path
             .file_name()
             .with_context(|| format!("Could not get file name for {}", path.display()))?
-            .to_str()
-            .with_context(|| format!("File name is not valid UTF-8 for {}", path.display()))?
-            .to_owned();
+            .to_string_lossy()
+            .to_string();
         if path.is_dir() {
             let directory_tree = Tree::create_recursive(path, index)?;
             let entry = TreeEntry {
@@ -228,13 +227,12 @@ impl Tree {
     }
 
     pub fn load(object_path: impl AsRef<Path>) -> Result<Self> {
-        let mut file =
-            File::open(&object_path).context("Unable to load tree. Object does not exist")?;
-        let mut serialized_data = vec![];
-        file.read_to_end(&mut serialized_data)
+        let mut serialized_data_buf = vec![];
+        let serialized_data = File::open(&object_path)
+            .and_then(|mut file| file.read_to_end(&mut serialized_data_buf))
+            .map_err(anyhow::Error::from)
+            .and_then(|_| decompress(&serialized_data_buf))
             .context("Unable to load tree. Unable to read object file")?;
-        let serialized_data = decompress(&serialized_data)
-            .context("Unable to load tree. Unable to decompress serialized data")?;
 
         let hash = Hash::of(&serialized_data);
         let mut serialized_data_iter = serialized_data.into_iter().peekable();
