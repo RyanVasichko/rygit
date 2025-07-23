@@ -209,7 +209,6 @@ mod tests {
         assert_eq!("a", fs::read_to_string(repo.path().join("a.txt"))?);
 
         todo!("test subdirectories");
-
         todo!("How to handle uncommitted files when switching branches?");
     }
 }
