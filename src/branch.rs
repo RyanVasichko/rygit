@@ -108,6 +108,10 @@ impl Branch {
         for (entry_path, entry_hash) in tree.entries_flattened() {
             let blob = Blob::load(entry_hash.object_path())?;
             let body = blob.body()?.iter().map(|&c| c as char).collect::<String>();
+            if let Some(parent) = entry_path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("unable to create file {}", entry_path.display()))?;
+            }
             fs::write(entry_path, body)?;
         }
 
@@ -184,23 +188,31 @@ mod tests {
     fn test_switch() -> Result<()> {
         let repo = TestRepo::new()?;
         repo.file("a.txt", "a")?
+            .file("a/a.txt", "subdira")?
             .stage(".")?
             .commit("Initial commit")?;
 
         repo.branch("test")?
             .switch("test")?
             .file("b.txt", "b")?
+            .file("b/b.txt", "subdirb")?
             .stage(".")?
             .commit("Commit on test")?;
 
         let file_b_path = repo.path().join("b.txt");
         assert_eq!("test", Branch::current()?.name);
         assert!(file_b_path.exists());
+        let subdir_file_b_path = repo.path().join("b").join("b.txt");
+        assert!(subdir_file_b_path.exists());
+        assert_eq!("subdirb", fs::read_to_string(subdir_file_b_path)?);
 
         repo.switch("master")?;
         assert_eq!("master", Branch::current()?.name);
         assert!(!file_b_path.exists());
         assert_eq!("a", fs::read_to_string(repo.path().join("a.txt"))?);
+        let subdir_file_a_path = repo.path().join("a").join("a.txt");
+        assert!(subdir_file_a_path.exists());
+        assert_eq!("subdira", fs::read_to_string(subdir_file_a_path)?);
 
         repo.switch("test")?;
         assert_eq!("test", Branch::current()?.name);
@@ -208,7 +220,8 @@ mod tests {
         assert_eq!("b", fs::read_to_string(&file_b_path)?);
         assert_eq!("a", fs::read_to_string(repo.path().join("a.txt"))?);
 
-        todo!("test subdirectories");
-        todo!("How to handle uncommitted files when switching branches?");
+        // TODO: Test for handling uncommitted files
+
+        Ok(())
     }
 }

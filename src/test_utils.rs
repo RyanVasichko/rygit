@@ -31,6 +31,7 @@ impl TestRepo {
 
     pub fn file(&self, relative_path: impl AsRef<Path>, contents: &str) -> Result<&Self> {
         let file_path = self.path.join(relative_path.as_ref());
+        println!("creating file {}", file_path.display());
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent)?;
         }
