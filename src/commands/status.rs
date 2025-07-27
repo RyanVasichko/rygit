@@ -1,12 +1,15 @@
 use anyhow::Result;
 
 use crate::{
+    branch::Branch,
     paths::repository_root_path,
     repository_status::{RepositoryStatus, StatusEntry},
 };
 
 pub fn run() -> Result<()> {
     let status = RepositoryStatus::load()?;
+    let current_branch = Branch::current()?;
+    println!("On branch {}", current_branch.name());
 
     println!("Changes to be committed:");
     for staged_change in status.staged_changes() {

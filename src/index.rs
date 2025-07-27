@@ -14,6 +14,7 @@ use crate::{
     paths::{index_path, repository_root_path, rygit_path},
 };
 
+#[derive(Debug)]
 pub struct Index {
     files: Vec<IndexFile>,
 }
@@ -181,6 +182,7 @@ impl Index {
     }
 }
 
+#[derive(Debug)]
 pub struct IndexFile {
     path: PathBuf,
     hash: Hash,

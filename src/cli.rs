@@ -4,6 +4,7 @@ use anyhow::{Context, Ok, Result, bail};
 use clap::{Parser, Subcommand};
 
 use crate::{
+    branch::Branch,
     commands::{self},
     paths::discover_repository_root_from,
 };
@@ -29,6 +30,14 @@ pub enum Commands {
         path: String,
     },
     Status,
+    Branch {
+        name: Option<String>,
+    },
+    Switch {
+        name: String,
+        #[clap(short, long)]
+        create: bool,
+    },
 }
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -55,6 +64,20 @@ pub fn run(cli: Cli) -> Result<()> {
             commands::add::run(path)?;
         }
         Commands::Status => commands::status::run()?,
+        Commands::Branch { name } => {
+            if let Some(name) = name {
+                Branch::create(name)?;
+            } else {
+                commands::branch::list()?;
+            }
+        }
+        Commands::Switch { name, create } => {
+            if *create {
+                Branch::create(name)?;
+            }
+
+            Branch::switch(name)?;
+        }
     };
 
     Ok(())

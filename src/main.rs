@@ -2,6 +2,7 @@ use clap::Parser;
 
 use crate::cli::Cli;
 
+pub mod branch;
 pub mod cli;
 pub mod commands;
 pub mod compression;
